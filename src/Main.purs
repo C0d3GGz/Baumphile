@@ -2,80 +2,140 @@ module Main (main) where
 
 import Prelude
 
-import Affjax as AX
-import Affjax.ResponseFormat as RF
-import Data.Argonaut as A
-import Data.Either (Either(..))
-import Data.Foldable (for_)
-import Data.Maybe (Maybe(..), fromMaybe)
-import Data.String as String
 import Effect (Effect)
-import Effect.Aff (Aff)
-import Effect.Class.Console as Console
-import Halogen (liftAff)
-import Halogen as H
-import Halogen.Aff as HA
-import Halogen.HTML as HH
-import Halogen.HTML.Events as HE
-import Halogen.HTML.Properties as HP
-import Halogen.VDom.Driver (runUI)
+import Effect.Console (logShow)
+import Effect.Console as Console
 
-type State = { label :: Maybe String, currentInput :: String }
-type Repo = { name :: String }
+data Box a = BoxC a
+data Phantom a = PhantomC
+data Option a = Some a | None
+data Seq a = ConsS a (Seq a) | NilS
+data Cont r a = ContC ((a -> r) -> r)
 
-data Action = Toggle | InputChanged String
+class Funktor (f :: Type -> Type) where
+  mapF :: forall a b. (a -> b) -> f a -> f b
 
-component :: forall q i o. H.Component HH.HTML q i o Aff
-component =
-  H.mkComponent
-    { initialState
-    , render
-    , eval: H.mkEval $ H.defaultEval { handleAction = handleAction }
-    }
+instance funktorb :: Funktor Box where
+  mapF = mapBox
 
-initialState :: forall i. i -> State
-initialState _ = { label: Nothing, currentInput: "" }
+instance funktorP :: Funktor Phantom where
+  mapF = mapPhantom
 
-render :: forall m. State -> H.ComponentHTML Action () m
-render state =
-  let
-    label = fromMaybe "Click me!" state.label
-  in
-    HH.div_ 
-      [ HH.input 
-        [ HP.placeholder "Type in me..."
-        , HP.value state.currentInput
-        , HE.onValueInput (Just <<< InputChanged) -- f <<< g = \x -> f (g x)
-        ]
-      , HH.button
-        [ HP.title label
-        , HE.onClick \_ -> if String.trim state.currentInput == "" then Nothing else Just Toggle
-        ]
-        [ HH.text label ]
-      ]
-    
+instance funcktorO :: Funktor Option where
+  mapF = mapOption
 
-handleAction ∷ forall o. Action → H.HalogenM State Action () o Aff Unit
-handleAction = case _ of
-  Toggle -> do
-    liftAff (AX.get RF.json "https://api.github.com/users/alexdobry/repos") >>= case _ of
-      Left err -> 
-        Console.log (AX.printError err)
-      Right {body} -> case A.decodeJson body of
-        Left parseErr -> 
-          Console.log parseErr
-        Right (repos :: Array Repo) -> 
-          for_ repos (Console.log <<< _.name)
-            
+instance funktorS :: Funktor Seq where
+  mapF = mapSeq
 
-    H.modify_ \st -> st { label = Just st.currentInput }
+instance funktorC :: Funktor (Cont r) where
+  mapF = mapCont
 
+class Funktor f <= Applikative f where
+  applü :: forall a b. f (a -> b) -> f a -> f b
+  püre :: forall a. a -> f a
 
-  InputChanged newText ->
-     Console.log newText >>= \_ ->
-       H.modify_ (_ { currentInput = newText }) -- \st -> st <-> (_ {...})
-    --H.modify_ \st -> st { enabled = not st.enabled }
+instance appb :: Applikative Box where
+  applü = applyBox
+  püre = BoxC
+
+instance appP :: Applikative Phantom where
+  applü = applyPhantom
+  püre = \_ -> PhantomC
+
+instance appO :: Applikative Option where
+  applü = applyOption
+  püre = Some
+
+instance appS :: Applikative Seq where
+  applü = applySeq
+  püre = \a -> ConsS a NilS
+
+instance appC :: Applikative (Cont r) where
+  applü = applyCont
+  püre = \a -> ContC (\f -> f a)
+
+defaultMap :: forall f a b. Applikative f => (a -> b) -> f a -> f b
+defaultMap = applü <<< püre
+
+mapPhantom :: forall a b. (a -> b) -> Phantom a -> Phantom b
+mapPhantom = \_ _ -> PhantomC
+
+mapBox :: forall a b. (a -> b) -> Box a -> Box b
+mapBox = \f box -> case box of
+  BoxC a -> BoxC (f a)
+
+mapOption :: forall a b. (a -> b) -> Option a -> Option b
+mapOption = \f o -> case o of
+  Some a -> Some (f a)
+  None -> None
+
+mapSeq :: forall a b. (a -> b) -> Seq a -> Seq b
+mapSeq = \f seq -> case seq of
+  ConsS h t -> ConsS (f h) (mapSeq f t)
+  NilS -> NilS
+
+mapCont :: forall a b r. (a -> b) -> Cont r a -> Cont r b
+mapCont = \f c -> case c of
+  ContC k -> ContC (\kb -> k (kb <<< f)) -- f: a -> b ; kb: b -> r ; k: (a -> r) -> r
+
+runCont :: forall r a. Cont r a -> (a -> r) -> r
+runCont = case _ of
+  ContC k -> k
+
+ignoreF :: forall a f. Funktor f => f a -> f Unit
+ignoreF = mapF (const unit)
+
+negateO :: Option Int -> Option Int
+negateO = mapF negate
+
+plusO :: Option Int -> Option Int -> Option Int
+plusO = \o1 o2 -> liftZwei add o1 o2
+
+applyOption :: forall a b. Option (a -> b) -> Option a -> Option b
+applyOption = case _, _ of
+  Some f, Some a -> Some (f a)
+  _, _ -> None
+
+applyBox :: forall a b. Box (a -> b) -> Box a -> Box b
+applyBox = case _, _ of
+  BoxC f, BoxC a -> BoxC (f a)
+
+applyPhantom :: forall a b. Phantom (a -> b) -> Phantom a -> Phantom b
+applyPhantom = \_ _ -> PhantomC
+
+applyCont :: forall a b r. Cont r (a -> b) -> Cont r a -> Cont r b
+applyCont = case _, _ of
+  ContC kf, ContC ka -> ContC \kb -> 
+    kf \kab -> 
+      ka (kb <<< kab)
+
+applySeq :: forall a b. Seq (a -> b) -> Seq a -> Seq b
+applySeq = \fs as -> case fs of
+  ConsS hf tfs -> concat (mapF hf as) (applySeq tfs as)
+  NilS -> NilS
+
+concat :: forall a. Seq a -> Seq a -> Seq a
+concat = \s1 s2 -> case s1 of
+  ConsS h t -> ConsS h (concat t s2)
+  NilS -> s2
+
+type Person = { name :: String, age :: Int }
+
+getName :: forall r. Cont r String
+getName = ContC (\f -> f "Döni")
+
+getAge :: forall r. Cont r Int
+getAge = ContC (\f -> f 23)
+
+getDöni :: forall r. Cont r Person
+getDöni = applyCont (mapF (\name age -> { name, age }) getName) getAge
+
+useDöni :: String
+useDöni = runCont getDöni (\p -> p.name)
+
+liftZwei :: forall f a b c. Applikative f => (a -> b -> c) -> f a -> f b -> f c -- zip
+liftZwei = \f -> applü <<< mapF f -- \f fa fb -> applü (mapF f fa) fb
 
 main :: Effect Unit
-main = HA.runHalogenAff
-  (HA.awaitBody >>= runUI component unit)
+main = do
+  pure unit
