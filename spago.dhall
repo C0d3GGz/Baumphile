@@ -11,6 +11,7 @@ You can edit this file as you like.
   , "effect"
   , "halogen"
   , "psci-support"
+  , "random"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs" ]

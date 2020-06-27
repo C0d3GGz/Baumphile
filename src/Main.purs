@@ -6,6 +6,8 @@ import Data.Maybe (Maybe(..))
 import Data.String as String
 import Effect (Effect)
 import Effect.Console as Console
+import Öffekt (Öffekt)
+import Öffekt as Öffekt
 
 data Box a = BoxC a
 data Phantom a = PhantomC
@@ -97,6 +99,9 @@ instance funktorParser :: Funktor Parser where
 instance funktorReader :: Funktor (Reader e) where
   mapF = mapReader
 
+instance funktorÖffekt :: Funktor Öffekt where
+  mapF = Öffekt.mäp
+
 class Funktor f <= Applikative f where
   applü :: forall a b. f (a -> b) -> f a -> f b
   püre :: forall a. a -> f a
@@ -128,6 +133,10 @@ instance appParser :: Applikative Parser where
 instance appReader :: Applikative (Reader e) where
   applü = applyReader
   püre = pureReader
+
+instance appÖffekt :: Applikative Öffekt where
+  applü = Öffekt.applü
+  püre = Öffekt.püre
 
 defaultMap :: forall f a b. Applikative f => (a -> b) -> f a -> f b
 defaultMap = applü <<< püre
@@ -248,6 +257,9 @@ instance fmParser :: Mönad Parser where
 instance fmReader :: Mönad (Reader e) where
   flätMäp = flatMapReader
 
+instance fmÖffekt :: Mönad Öffekt where
+  flätMäp = Öffekt.flätMap
+
 type Person = { name :: String, age :: Int }
 
 getName :: forall r. Cont r String
@@ -258,6 +270,12 @@ getAge = ContC (\f -> f 23)
 
 getDöni :: forall r. Cont r Person
 getDöni = applyCont (mapF (\name age -> { name, age }) getName) getAge
+
+getDöniDb :: Effect Person
+getDöniDb = pure {name: "Döni", age: 19}
+
+isAdult :: Person -> Boolean
+isAdult = \p -> p.age >= 18
 
 useDöni :: String
 useDöni = runCont getDöni (\p -> p.name)
@@ -278,44 +296,53 @@ greetPerson = \info -> liftZwei (<>) (showAge info) (showSkill info)
 
 main :: Effect Unit
 main = do
-
-  -- async await
-  let a = ContC (\k -> k 42)
-  let b = \x -> if x > 10 then ContC (\k -> k "large") else ContC (\k -> k "small")
-  let largeOrSmall = flätMäpCont a b
-  runCont largeOrSmall Console.log 
+  döni <- getDöniDb
+  Console.logShow (isAdult döni)
 
 
+-- main :: Effect Unit
+-- main = void ((replicateA 10 (Random.randomInt 0 10 >>= \r -> Console.log (show r))) :: Effect (Array _))
 
-  let parserHello = parseString "Hallo"
-  let parserWorld = parseString "Welt"
-  let input = "HalloWelt"
-  let combine = \str str2 -> str <> " " <> str2 <> "!"
+-- main :: Effect Unit
+-- main = do
 
-  let input2 = "Int: 42" -- should use int parser
-  let input3 = "String: abc" -- should use string parser
-
-  --let parserHelloWorld = applüParser (mapParser combine parserHello) parserWorld
-  -- let parserHelloWorld = liftZwei combine parserHello parserWorld
-
-  let
-    parserHelloWorld = 
-      parserHello >> \hello -> 
-        parserWorld >> \world ->
-          püre (combine hello world)
-
-{-   do
-    hello <- parserHello
-    world <- parserWorld
-    püre (combine hello world) -}
-
-  case runParser parserHelloWorld input of
-    None -> Console.log "parsing failed"
-    Some res -> Console.log ("sucessfully parsed: " <> res)
+--   -- async await
+--   let a = ContC (\k -> k 42)
+--   let b = \x -> if x > 10 then ContC (\k -> k "large") else ContC (\k -> k "small")
+--   let largeOrSmall = flätMäpCont a b
+--   runCont largeOrSmall Console.log 
 
 
-  let person = { age : 30, skill: 1.1 }
-  Console.log (unReader (greetPerson person) "Alech")
+
+--   let parserHello = parseString "Hallo"
+--   let parserWorld = parseString "Welt"
+--   let input = "HalloWelt"
+--   let combine = \str str2 -> str <> " " <> str2 <> "!"
+
+--   let input2 = "Int: 42" -- should use int parser
+--   let input3 = "String: abc" -- should use string parser
+
+--   --let parserHelloWorld = applüParser (mapParser combine parserHello) parserWorld
+--   -- let parserHelloWorld = liftZwei combine parserHello parserWorld
+
+--   let
+--     parserHelloWorld = 
+--       parserHello >> \hello -> 
+--         parserWorld >> \world ->
+--           püre (combine hello world)
+
+-- {-   do
+--     hello <- parserHello
+--     world <- parserWorld
+--     püre (combine hello world) -}
+
+--   case runParser parserHelloWorld input of
+--     None -> Console.log "parsing failed"
+--     Some res -> Console.log ("sucessfully parsed: " <> res)
 
 
-  pure unit
+--   let person = { age : 30, skill: 1.1 }
+--   Console.log (unReader (greetPerson person) "Alech")
+
+
+--   pure unit
