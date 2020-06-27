@@ -4,11 +4,8 @@ import Prelude
 
 import Data.Maybe (Maybe(..))
 import Data.String as String
-import Data.Symbol (SProxy(..))
 import Effect (Effect)
-import Effect.Console (logShow)
 import Effect.Console as Console
-import Record as Record
 
 data Box a = BoxC a
 data Phantom a = PhantomC
@@ -16,6 +13,7 @@ data Option a = Some a | None
 data Seq a = ConsS a (Seq a) | NilS
 data Cont r a = ContC ((a -> r) -> r)
 data Parser a = ParserC (String -> Option { value :: a, remaining :: String })
+data Reader e a = ReaderC (e -> a) -- e = environment to inject, a = result (id -> person vs id -> dbConn -> person) 
 
 parseString :: String -> Parser String
 parseString = \str -> ParserC \input -> 
@@ -51,6 +49,30 @@ applüParser = case _,_ of
 püreParser :: forall a. a -> Parser a
 püreParser = \value -> ParserC \remaining -> Some { value, remaining }
 
+
+-- data Reader e a = ReaderC (e -> a) 
+-- e        is env (env)
+-- e -> a   is the action
+
+unReader :: forall e a. Reader e a -> e -> a
+unReader = \ (ReaderC action) env -> action env 
+
+mapReader :: forall a b e. (a -> b) -> Reader e a -> Reader e b
+mapReader = \f reader -> ReaderC \env -> case reader of
+  ReaderC action -> f (action env)
+
+pureReader :: forall e a. a -> Reader e a
+pureReader = \action -> ReaderC \env -> action
+
+applyReader :: forall a b e. Reader e (a -> b) -> Reader e a -> Reader e b
+applyReader = \readerMap readerA -> ReaderC \env -> case readerMap of
+  ReaderC actionMap -> case readerA of 
+    ReaderC action -> actionMap env (action env)
+  
+flatMapReader :: forall a b e. Reader e a -> (a -> Reader e b) -> Reader e b
+flatMapReader = \(ReaderC action) readerFlatMap -> ReaderC \env -> unReader (readerFlatMap (action env)) env
+
+
 class Funktor (f :: Type -> Type) where
   mapF :: forall a b. (a -> b) -> f a -> f b
 
@@ -71,6 +93,9 @@ instance funktorC :: Funktor (Cont r) where
 
 instance funktorParser :: Funktor Parser where
   mapF = mapParser
+
+instance funktorReader :: Funktor (Reader e) where
+  mapF = mapReader
 
 class Funktor f <= Applikative f where
   applü :: forall a b. f (a -> b) -> f a -> f b
@@ -99,6 +124,10 @@ instance appC :: Applikative (Cont r) where
 instance appParser :: Applikative Parser where
   applü = applüParser
   püre = püreParser
+
+instance appReader :: Applikative (Reader e) where
+  applü = applyReader
+  püre = pureReader
 
 defaultMap :: forall f a b. Applikative f => (a -> b) -> f a -> f b
 defaultMap = applü <<< püre
@@ -216,6 +245,8 @@ instance fmC :: Mönad (Cont r) where
 instance fmParser :: Mönad Parser where
   flätMäp = flätMäpParser
 
+instance fmReader :: Mönad (Reader e) where
+  flätMäp = flatMapReader
 
 type Person = { name :: String, age :: Int }
 
@@ -233,6 +264,17 @@ useDöni = runCont getDöni (\p -> p.name)
 
 liftZwei :: forall f a b c. Applikative f => (a -> b -> c) -> f a -> f b -> f c -- zip
 liftZwei = \f -> applü <<< mapF f -- \f fa fb -> applü (mapF f fa) fb
+
+type PersonInfo = { age :: Int, skill :: Number }
+
+showAge :: PersonInfo -> Reader String String
+showAge = \info -> ReaderC \name -> name <> " is " <> show info.age <> " years old"
+
+showSkill :: PersonInfo -> Reader String String
+showSkill = \info -> ReaderC \name -> name <> " has skill level " <> show info.skill
+
+greetPerson :: PersonInfo -> Reader String String
+greetPerson = \info -> liftZwei (<>) (showAge info) (showSkill info) 
 
 main :: Effect Unit
 main = do
@@ -270,4 +312,10 @@ main = do
   case runParser parserHelloWorld input of
     None -> Console.log "parsing failed"
     Some res -> Console.log ("sucessfully parsed: " <> res)
+
+
+  let person = { age : 30, skill: 1.1 }
+  Console.log (unReader (greetPerson person) "Alech")
+
+
   pure unit
